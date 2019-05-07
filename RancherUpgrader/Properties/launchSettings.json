@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RancherUpgrader": {
+      "commandName": "Project",
+      "commandLineArgs": "execute upgrade --url=http://hubrancher.eastus2.cloudapp.azure.com:8080/v2-beta/projects/1a5/services/1s132 --user 594960930007785ACF77 --pass S29f7MwLJeRWG5p8F4MdiU5YAt99ckf2U1LnTM8G --update-env -e test=testee -e x=y -e xpto=thoj=789 -e noeq -e novalue="
+    }
+  }
+}
