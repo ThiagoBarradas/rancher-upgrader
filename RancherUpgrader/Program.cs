@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Threading;
 
 namespace RancherUpgrader
 {
@@ -37,14 +38,17 @@ namespace RancherUpgrader
                     var url = config.Option("-r | --url", "API url for rancher service", CommandOptionType.SingleValue);
                     var user = config.Option("-u | --user", "User for authentication with rancher API", CommandOptionType.SingleValue);
                     var pass = config.Option("-p | --pass", "Pass for authentication with rancher API", CommandOptionType.SingleValue);
+                    var image = config.Option("-i | --image", "New image", CommandOptionType.SingleValue);
                     var tag = config.Option("-t | --tag", "New image tag", CommandOptionType.SingleValue);
+                    var forceFinish = config.Option("-f | --force", "Force finish if upgraded", CommandOptionType.NoValue);
                     var updateEnv = config.Option("-k | --update-env", "Update environment variables", CommandOptionType.NoValue);
+                    var wait = config.Option("-w | --wait", "Wait complete", CommandOptionType.NoValue);
                     var envs = config.Option("-e | --env", "Setup env var", CommandOptionType.MultipleValue);
 
                     config.HelpOption(HELP_ARGS);
                     config.OnExecute(() =>
                     {
-                        var options = new Options(action, url, user, pass, tag, updateEnv, envs);
+                        var options = new Options(action, url, user, pass, image, tag, updateEnv, wait, forceFinish, envs);
 
                         if (options.ReturnCode == 1)
                         {
@@ -98,6 +102,17 @@ namespace RancherUpgrader
             var result = Execute(opts, Method.GET, null);
 
             var launchConfig = result["launchConfig"];
+
+            if (opts.Force && result["state"] == "upgraded")
+            {
+                Console.WriteLine("Force finish...");
+                var clone = (Options) opts.Clone();
+                clone.Action = "finishrollback";
+                clone.Wait = true;
+                Finish(clone);
+                Console.WriteLine("Finished!");
+            }
+
             if (string.IsNullOrWhiteSpace(opts.Tag) == false)
             {
                 var splitted = ((string)launchConfig["imageUuid"]).Split(':');
@@ -109,6 +124,21 @@ namespace RancherUpgrader
                 else
                 {
                     splitted[splitted.Count() - 1] = opts.Tag;
+                    launchConfig["imageUuid"] = string.Join(':', splitted);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(opts.Image) == false)
+            {
+                var splitted = ((string)launchConfig["imageUuid"]).Split(':');
+
+                if (splitted.Count() == 1)
+                {
+                    launchConfig["imageUuid"] = opts.Image;
+                }
+                else
+                {
+                    splitted[splitted.Count() - 2] = opts.Image;
                     launchConfig["imageUuid"] = string.Join(':', splitted);
                 }
             }
@@ -191,13 +221,29 @@ namespace RancherUpgrader
                 throw new Exception();
             }
 
+            if (opts.Wait)
+            {
+                Console.Write("Waiting active state.");
+                dynamic waitResult;
+                do
+                {
+                    Thread.Sleep(1000);
+                    Console.Write(".");
+                    waitResult = Execute(opts, Method.GET, null);
+                }
+                while (waitResult["state"] != "active");
+                Console.WriteLine();
+            }
+
             return response.Data;
         }
     }
 
-    public class Options
+    public class Options : ICloneable
     {
-        public Options(CommandArgument action, CommandOption url, CommandOption user, CommandOption pass, CommandOption tag, CommandOption updateEnv, CommandOption envs)
+        public Options() { }
+
+        public Options(CommandArgument action, CommandOption url, CommandOption user, CommandOption pass, CommandOption image, CommandOption tag, CommandOption updateEnv, CommandOption wait, CommandOption force, CommandOption envs)
         {
             this.ErrorMessages = new List<string>();
             this.ReturnCode = 0;
@@ -216,7 +262,10 @@ namespace RancherUpgrader
             this.User = user.Value();
             this.Pass = pass.Value();
             this.Tag = tag.Value();
+            this.Image = image.Value();
             this.UpdateEnvironment = updateEnv.HasValue();
+            this.Wait = wait.HasValue();
+            this.Force = force.HasValue();
             this.EnvironmentVars = envs.Values.ToList();
         }
 
@@ -224,6 +273,11 @@ namespace RancherUpgrader
         {
             this.ReturnCode = 1;
             this.ErrorMessages.Add(message);
+        }
+
+        public object Clone()
+        {
+            return (Options) this.MemberwiseClone();
         }
 
         public int ReturnCode { get; set; }
@@ -238,9 +292,15 @@ namespace RancherUpgrader
 
         public string Pass { get; set; }
 
+        public string Image { get; set; }
+
         public string Tag { get; set; }
 
         public bool UpdateEnvironment { get; set; }
+
+        public bool Wait { get; set; }
+
+        public bool Force { get; set; }
 
         public List<string> EnvironmentVars { get; set; }
     }

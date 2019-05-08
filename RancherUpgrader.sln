@@ -3,12 +3,14 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27703.2026
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RancherUpgrader", "RancherUpgrader\RancherUpgrader.csproj", "{87ED1FE9-E67C-4647-8ACB-4CA652E856CF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RancherUpgrader", "RancherUpgrader\RancherUpgrader.csproj", "{87ED1FE9-E67C-4647-8ACB-4CA652E856CF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{A434087A-84F2-402E-9F44-C41D49479D1C}"
 	ProjectSection(SolutionItems) = preProject
 		.gitattributes = .gitattributes
 		.gitignore = .gitignore
+		Dockerfile = Dockerfile
+		LICENSE = LICENSE
 	EndProjectSection
 EndProject
 Global
