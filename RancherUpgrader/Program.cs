@@ -97,7 +97,7 @@ namespace RancherUpgrader
 
             if (opts.Wait)
             {
-                var maxWait = 180;
+                var maxWait = 300;
 
                 Console.Write($"Waiting {state} state.");
                 dynamic waitResult;
