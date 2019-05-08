@@ -76,18 +76,65 @@ namespace RancherUpgrader
 
         private static int Execute(Options opts)
         {
+            var returnCode = 0;
+            var state = "active";
             switch (opts.Action)
             {
                 case "upgrade":
-                    return Upgrade(opts);
+                    state = "upgraded";
+                    returnCode = Upgrade(opts);
+                    break;
                 case "finishupgrade":
-                    return Finish(opts);
+                    returnCode = Finish(opts);
+                    break;
                 case "rollback":
-                    return Rollback(opts);
+                    returnCode = Rollback(opts);
+                    break;
                 default:
                     Console.Write(" - Invalid action, try use upgrade, finishupgrade or rollback");
                     return 1;
             }
+
+            if (opts.Wait)
+            {
+                var maxWait = 180;
+
+                Console.Write($"Waiting {state} state.");
+                dynamic waitResult;
+                int count = 0;
+                do
+                {
+                    count++;
+                    Thread.Sleep(1000);
+                    Console.Write(".");
+                    waitResult = Execute(opts, Method.GET, null);
+                }
+                while (waitResult["state"] != state && waitResult["transitioning"] == "yes" && count <= maxWait);
+
+                if (opts.Action != "rollback")
+                {
+                    if (waitResult["state"] != state &&
+                        (waitResult["transitioning"] != "yes" || count > maxWait))
+                    {
+                        Console.WriteLine("Force rollback...");
+                        var clone = new Options(opts);
+                        clone.Action = "rollback";
+                        clone.Wait = true;
+                        Execute(clone);
+                        Console.WriteLine("Finished!");
+                        throw new TimeoutException(waitResult["transitioningMessage"]);
+                    }
+
+                    if (waitResult["state"] != state)
+                    {
+                        throw new TimeoutException($"Waiting {state} state failed!");
+                    }
+                }
+
+                Console.WriteLine();
+            }
+
+            return returnCode;
         }
 
         private static int Finish(Options opts)
@@ -106,10 +153,10 @@ namespace RancherUpgrader
             if (opts.Force && result["state"] == "upgraded")
             {
                 Console.WriteLine("Force finish...");
-                var clone = (Options) opts.Clone();
-                clone.Action = "finishrollback";
+                var clone = new Options(opts);
+                clone.Action = "finishupgrade";
                 clone.Wait = true;
-                Finish(clone);
+                Execute(clone);
                 Console.WriteLine("Finished!");
             }
 
@@ -221,27 +268,27 @@ namespace RancherUpgrader
                 throw new Exception();
             }
 
-            if (opts.Wait)
-            {
-                Console.Write("Waiting active state.");
-                dynamic waitResult;
-                do
-                {
-                    Thread.Sleep(1000);
-                    Console.Write(".");
-                    waitResult = Execute(opts, Method.GET, null);
-                }
-                while (waitResult["state"] != "active");
-                Console.WriteLine();
-            }
-
             return response.Data;
         }
     }
 
-    public class Options : ICloneable
+    public class Options
     {
-        public Options() { }
+        public Options(Options opts)
+        {
+            this.Action = opts.Action;
+            this.EnvironmentVars = opts.EnvironmentVars;
+            this.ErrorMessages = opts.ErrorMessages;
+            this.Force = opts.Force;
+            this.Image = opts.Image;
+            this.Tag = opts.Tag;
+            this.ReturnCode = opts.ReturnCode;
+            this.Pass = opts.Pass;
+            this.User = opts.User;
+            this.Url = opts.Url;
+            this.Wait = opts.Wait;
+            this.UpdateEnvironment = opts.UpdateEnvironment;
+        }
 
         public Options(CommandArgument action, CommandOption url, CommandOption user, CommandOption pass, CommandOption image, CommandOption tag, CommandOption updateEnv, CommandOption wait, CommandOption force, CommandOption envs)
         {
@@ -273,11 +320,6 @@ namespace RancherUpgrader
         {
             this.ReturnCode = 1;
             this.ErrorMessages.Add(message);
-        }
-
-        public object Clone()
-        {
-            return (Options) this.MemberwiseClone();
         }
 
         public int ReturnCode { get; set; }
