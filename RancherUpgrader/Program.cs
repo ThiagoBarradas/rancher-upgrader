@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace RancherUpgrader
 {
@@ -39,6 +40,7 @@ namespace RancherUpgrader
                     var user = config.Option("-u | --user", "User for authentication with rancher API", CommandOptionType.SingleValue);
                     var pass = config.Option("-p | --pass", "Pass for authentication with rancher API", CommandOptionType.SingleValue);
                     var image = config.Option("-i | --image", "New image", CommandOptionType.SingleValue);
+                    var ttl = config.Option("-m | --max-time", "Max Time to Wait in Seconds", CommandOptionType.SingleValue);
                     var tag = config.Option("-t | --tag", "New image tag", CommandOptionType.SingleValue);
                     var forceFinish = config.Option("-f | --force", "Force finish if upgraded", CommandOptionType.NoValue);
                     var updateEnv = config.Option("-k | --update-env", "Update environment variables", CommandOptionType.NoValue);
@@ -48,7 +50,7 @@ namespace RancherUpgrader
                     config.HelpOption(HELP_ARGS);
                     config.OnExecute(() =>
                     {
-                        var options = new Options(action, url, user, pass, image, tag, updateEnv, wait, forceFinish, envs);
+                        var options = new Options(action, url, user, pass, image, tag, updateEnv, wait, forceFinish, envs, ttl);
 
                         if (options.ReturnCode == 1)
                         {
@@ -57,7 +59,23 @@ namespace RancherUpgrader
                         }
                         else
                         {
-                            return Execute(options);
+                            var optionsSplitted = options.Split();
+
+                            if (optionsSplitted.Count() == 1)
+                            {
+                                return Execute(options);
+                            }
+
+                            List<Options> results = new List<Options>();
+                            int code = 0;
+
+                            Parallel.ForEach(optionsSplitted, new ParallelOptions { MaxDegreeOfParallelism = 20 }, opt =>
+                            {
+                                var tempCode = Execute(opt);
+                                code += tempCode;
+                            });
+
+                            return code == 0 ? 0 : 1;
                         }
                     });
                 });
@@ -78,6 +96,7 @@ namespace RancherUpgrader
         {
             var returnCode = 0;
             var state = "active";
+            Console.WriteLine("");
             switch (opts.Action)
             {
                 case "upgrade":
@@ -97,7 +116,7 @@ namespace RancherUpgrader
 
             if (opts.Wait)
             {
-                var maxWait = 300;
+                var maxWait = opts.Ttl * 60;
 
                 Console.Write($"Waiting {state} state.");
                 dynamic waitResult;
@@ -248,7 +267,7 @@ namespace RancherUpgrader
 
             if (response.ErrorException != null)
             {
-                Console.WriteLine("Exception:");
+                Console.WriteLine("Exception | {0}", opts.Url);
                 Console.WriteLine(response.ErrorException.Message);
                 throw new Exception();
             }
@@ -261,9 +280,15 @@ namespace RancherUpgrader
                 HttpStatusCode.NoContent
             };
 
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity &&
+                opts.Action != "upgrade")
+            {
+                return response.Data;
+            }
+
             if (statusCodes.Contains(response.StatusCode) == false)
             {
-                Console.WriteLine("Invalid StatusCode");
+                Console.WriteLine("Invalid StatusCode | {0}", opts.Url);
                 Console.WriteLine(response.StatusDescription);
                 throw new Exception();
             }
@@ -274,6 +299,8 @@ namespace RancherUpgrader
 
     public class Options
     {
+        public const int DEFAULT_TTL = 10;
+
         public Options(Options opts)
         {
             this.Action = opts.Action;
@@ -288,9 +315,10 @@ namespace RancherUpgrader
             this.Url = opts.Url;
             this.Wait = opts.Wait;
             this.UpdateEnvironment = opts.UpdateEnvironment;
+            this.Ttl = opts.Ttl;
         }
 
-        public Options(CommandArgument action, CommandOption url, CommandOption user, CommandOption pass, CommandOption image, CommandOption tag, CommandOption updateEnv, CommandOption wait, CommandOption force, CommandOption envs)
+        public Options(CommandArgument action, CommandOption url, CommandOption user, CommandOption pass, CommandOption image, CommandOption tag, CommandOption updateEnv, CommandOption wait, CommandOption force, CommandOption envs, CommandOption ttl)
         {
             this.ErrorMessages = new List<string>();
             this.ReturnCode = 0;
@@ -314,12 +342,50 @@ namespace RancherUpgrader
             this.Wait = wait.HasValue();
             this.Force = force.HasValue();
             this.EnvironmentVars = envs.Values.ToList();
+            try
+            {
+                var ttlValue = ttl.Value();
+                if (!string.IsNullOrWhiteSpace(ttlValue))
+                {
+                    this.Ttl = int.Parse(ttlValue);
+                }
+                else
+                {
+                    this.Ttl = DEFAULT_TTL;
+                }
+            }
+            catch (Exception)
+            {
+                this.Ttl = DEFAULT_TTL;
+            }
         }
 
         public void AddError(string message)
         {
             this.ReturnCode = 1;
             this.ErrorMessages.Add(message);
+        }
+
+        public bool IsMultiple()
+        {
+            return this.Url.Contains("|");
+        }
+
+        public List<Options> Split()
+        {
+            if (!this.IsMultiple())
+            {
+                return new List<Options> { this };
+            }
+
+            var urls = this.Url.Split("|");
+
+            return urls.Select(url =>
+            {
+                var temp = new Options(this);
+                temp.Url = url;
+                return temp;
+            }).ToList();
         }
 
         public int ReturnCode { get; set; }
@@ -343,6 +409,8 @@ namespace RancherUpgrader
         public bool Wait { get; set; }
 
         public bool Force { get; set; }
+
+        public int Ttl { get; set; }
 
         public List<string> EnvironmentVars { get; set; }
     }
